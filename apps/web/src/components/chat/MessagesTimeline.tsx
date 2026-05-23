@@ -837,6 +837,10 @@ const UserMessageBody = memo(function UserMessageBody(props: {
   terminalContexts: ParsedTerminalContextEntry[];
   skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
 }) {
+  // T3CODE-FORK-MOD-BEGIN fork/chat-code-highlighting
+  const ctx = use(TimelineRowCtx);
+  // T3CODE-FORK-MOD-END fork/chat-code-highlighting
+
   if (props.terminalContexts.length > 0) {
     const hasEmbeddedInlineLabels = textContainsInlineTerminalContextLabels(
       props.text,
@@ -923,11 +927,13 @@ const UserMessageBody = memo(function UserMessageBody(props: {
     return null;
   }
 
+  // T3CODE-FORK-MOD-BEGIN fork/chat-code-highlighting
   return (
-    <div className="whitespace-pre-wrap wrap-break-word text-sm leading-relaxed text-foreground">
-      <SkillInlineText text={props.text} skills={props.skills} />
+    <div className="text-foreground">
+      <ChatMarkdown text={props.text} cwd={ctx.markdownCwd} skills={props.skills} />
     </div>
   );
+  // T3CODE-FORK-MOD-END fork/chat-code-highlighting
 });
 
 // ---------------------------------------------------------------------------
@@ -1023,16 +1029,30 @@ function workToneIcon(tone: TimelineWorkEntry["tone"]): {
   }
   return {
     icon: ZapIcon,
-    className: "text-foreground/92",
+    // T3CODE-FORK-MOD-BEGIN fork/tool-text-tone
+    className: "text-[color:var(--tool-rendering-text)]",
+    // T3CODE-FORK-MOD-END fork/tool-text-tone
   };
 }
 
 function workToneClass(tone: "thinking" | "tool" | "info" | "error"): string {
   if (tone === "error") return "text-rose-300/50 dark:text-rose-300/50";
-  if (tone === "tool") return "text-muted-foreground/70";
+  // T3CODE-FORK-MOD-BEGIN fork/tool-text-tone
+  if (tone === "tool") return "text-[color:var(--tool-rendering-text)]";
+  // T3CODE-FORK-MOD-END fork/tool-text-tone
   if (tone === "thinking") return "text-muted-foreground/50";
   return "text-muted-foreground/40";
 }
+
+// T3CODE-FORK-MOD-BEGIN fork/tool-text-tone
+function workPreviewClass(tone: "thinking" | "tool" | "info" | "error"): string {
+  if (tone === "tool") {
+    return "text-[color:var(--tool-rendering-text)] opacity-70 transition-opacity hover:opacity-90 focus-visible:opacity-90";
+  }
+
+  return "text-muted-foreground/55 transition-colors hover:text-muted-foreground/75 focus-visible:text-muted-foreground/75";
+}
+// T3CODE-FORK-MOD-END fork/tool-text-tone
 
 function workEntryPreview(
   workEntry: Pick<TimelineWorkEntry, "detail" | "command" | "changedFiles">,
@@ -1147,7 +1167,12 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
                       closeDelay={0}
                       delay={75}
                       render={
-                        <span className="max-w-full cursor-default text-muted-foreground/55 transition-colors hover:text-muted-foreground/75 focus-visible:text-muted-foreground/75">
+                        <span
+                          className={cn(
+                            "max-w-full cursor-default",
+                            workPreviewClass(workEntry.tone),
+                          )}
+                        >
                           {" "}
                           - {preview}
                         </span>
@@ -1183,7 +1208,12 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
                   <span className={cn("text-foreground/80", workToneClass(workEntry.tone))}>
                     {heading}
                   </span>
-                  {preview && <span className="text-muted-foreground/55"> - {preview}</span>}
+                  {preview && (
+                    <span className={cn("opacity-70", workToneClass(workEntry.tone))}>
+                      {" "}
+                      - {preview}
+                    </span>
+                  )}
                 </p>
               </TooltipTrigger>
               <TooltipPopup className="max-w-[min(720px,calc(100vw-2rem))]">

@@ -89,6 +89,10 @@
   --background: var(--color-white);
   --app-chrome-background: var(--background);
   --foreground: var(--color-neutral-800);
+  /* T3CODE-FORK-MOD-BEGIN fork/custom-theme */
+  --chat-message-text: color-mix(in srgb, var(--foreground) 80%, transparent);
+  --tool-rendering-text: color-mix(in srgb, var(--muted-foreground) 70%, transparent);
+  /* T3CODE-FORK-MOD-END fork/custom-theme */
   --card: var(--color-white);
   --card-foreground: var(--color-neutral-800);
   --popover: var(--color-white);
@@ -118,6 +122,10 @@
     --background: color-mix(in srgb, var(--color-neutral-950) 95%, var(--color-white));
     --app-chrome-background: var(--background);
     --foreground: var(--color-neutral-100);
+    /* T3CODE-FORK-MOD-BEGIN fork/custom-theme */
+    --chat-message-text: color-mix(in srgb, var(--foreground) 80%, transparent);
+    --tool-rendering-text: color-mix(in srgb, var(--muted-foreground) 70%, transparent);
+    /* T3CODE-FORK-MOD-END fork/custom-theme */
     --card: color-mix(in srgb, var(--background) 98%, var(--color-white));
     --card-foreground: var(--color-neutral-100);
     --popover: color-mix(in srgb, var(--background) 98%, var(--color-white));
@@ -472,6 +480,25 @@ label:has(> select#reasoning-effort) select {
 .chat-markdown .chat-markdown-shiki .shiki {
   background: color-mix(in srgb, var(--muted) 78%, var(--background)) !important;
 }
+
+/* T3CODE-FORK-MOD-BEGIN fork/chat-code-highlighting */
+.chat-markdown .chat-markdown-inline-code {
+  display: inline;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  border-radius: 0.25rem;
+  background: color-mix(in srgb, var(--muted) 68%, var(--background));
+  padding: 0.1rem 0.28rem;
+  color: var(--chat-message-text);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+  font-size: 0.78em;
+  line-height: 1.35;
+  white-space: break-spaces;
+}
+
+.chat-markdown .chat-markdown-inline-shiki span {
+  background: transparent !important;
+}
+/* T3CODE-FORK-MOD-END fork/chat-code-highlighting */
 
 .chat-markdown table {
   width: 100%;

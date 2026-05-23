@@ -24,7 +24,11 @@ import { renderSkillInlineMarkdownChildren } from "./chat/SkillInlineText";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { openInPreferredEditor } from "../editorPreferences";
-import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
+import {
+  CODE_BLOCK_THEME_NAME,
+  ensureCodeBlockThemeRegistered,
+  type CodeBlockThemeName,
+} from "../lib/diffRendering";
 import { fnv1a32 } from "../lib/diffRendering";
 import { LRUCache } from "../lib/lruCache";
 import { useTheme } from "../hooks/useTheme";
@@ -75,6 +79,26 @@ const highlightedCodeCache = new LRUCache<string>(
 );
 const highlighterPromiseCache = new Map<string, Promise<DiffsHighlighter>>();
 
+// T3CODE-FORK-MOD-BEGIN fork/chat-code-highlighting
+const CPP_TYPE_COLOR = "#41c7ff";
+const DEFAULT_CODE_TOKEN_COLOR_PATTERN = /^(?:#f4f4f4|rgb\(244,\s*244,\s*244\))$/i;
+const CPP_LIKE_LANGUAGE_PATTERN = /^(?:c|cpp|c\+\+|h|hpp|cc|cxx)$/i;
+const CPP_LIKE_TYPE_IDENTIFIER_PATTERN =
+  /\b(?:bool|char|double|float|int|int8|int16|int32|int64|uint8|uint16|uint32|uint64|void|[AFISTU][A-Z]\w*)\b/g;
+const INLINE_CODE_LANGUAGE_CANDIDATES = [
+  "cpp",
+  "ts",
+  "tsx",
+  "js",
+  "json",
+  "bash",
+  "powershell",
+  "text",
+] as const;
+
+type InlineCodeLanguage = (typeof INLINE_CODE_LANGUAGE_CANDIDATES)[number];
+// T3CODE-FORK-MOD-END fork/chat-code-highlighting
+
 function extractFenceLanguage(className: string | undefined): string {
   const match = className?.match(CODE_FENCE_LANGUAGE_REGEX);
   const raw = match?.[1] ?? "text";
@@ -95,6 +119,18 @@ function nodeToPlainText(node: ReactNode): string {
   return "";
 }
 
+// T3CODE-FORK-MOD-BEGIN fork/chat-code-highlighting
+function hastNodeToPlainText(node: unknown): string {
+  if (node == null || typeof node !== "object") return "";
+  const maybeTextNode = node as { value?: unknown; children?: unknown };
+  if (typeof maybeTextNode.value === "string") return maybeTextNode.value;
+  if (Array.isArray(maybeTextNode.children)) {
+    return maybeTextNode.children.map((child) => hastNodeToPlainText(child)).join("");
+  }
+  return "";
+}
+// T3CODE-FORK-MOD-END fork/chat-code-highlighting
+
 function extractCodeBlock(
   children: ReactNode,
 ): { className: string | undefined; code: string } | null {
@@ -104,10 +140,7 @@ function extractCodeBlock(
   }
 
   const onlyChild = childNodes[0];
-  if (
-    !isValidElement<{ className?: string; children?: ReactNode }>(onlyChild) ||
-    onlyChild.type !== "code"
-  ) {
+  if (!isValidElement<{ className?: string; children?: ReactNode }>(onlyChild)) {
     return null;
   }
 
@@ -117,9 +150,23 @@ function extractCodeBlock(
   };
 }
 
-function createHighlightCacheKey(code: string, language: string, themeName: DiffThemeName): string {
+function createHighlightCacheKey(
+  code: string,
+  language: string,
+  themeName: CodeBlockThemeName,
+): string {
   return `${fnv1a32(code).toString(36)}:${code.length}:${language}:${themeName}`;
 }
+
+// T3CODE-FORK-MOD-BEGIN fork/chat-code-highlighting
+function createInlineHighlightCacheKey(
+  code: string,
+  language: string,
+  themeName: CodeBlockThemeName,
+): string {
+  return `inline:${createHighlightCacheKey(code, language, themeName)}`;
+}
+// T3CODE-FORK-MOD-END fork/chat-code-highlighting
 
 function estimateHighlightedSize(html: string, code: string): number {
   return Math.max(html.length * 2, code.length * 3);
@@ -129,11 +176,14 @@ function getHighlighterPromise(language: string): Promise<DiffsHighlighter> {
   const cached = highlighterPromiseCache.get(language);
   if (cached) return cached;
 
+  // T3CODE-FORK-MOD-BEGIN fork/chat-code-highlighting
+  ensureCodeBlockThemeRegistered();
   const promise = getSharedHighlighter({
-    themes: [resolveDiffThemeName("dark"), resolveDiffThemeName("light")],
+    themes: [CODE_BLOCK_THEME_NAME],
     langs: [language as SupportedLanguages],
     preferredHighlighter: "shiki-js",
   }).catch((err) => {
+    // T3CODE-FORK-MOD-END fork/chat-code-highlighting
     highlighterPromiseCache.delete(language);
     if (language === "text") {
       // "text" itself failed — Shiki cannot initialize at all, surface the error
@@ -145,6 +195,115 @@ function getHighlighterPromise(language: string): Promise<DiffsHighlighter> {
   highlighterPromiseCache.set(language, promise);
   return promise;
 }
+
+// T3CODE-FORK-MOD-BEGIN fork/chat-code-highlighting
+function inferInlineCodeLanguage(code: string): InlineCodeLanguage {
+  const trimmedCode = code.trim();
+  if (trimmedCode.length === 0) return "text";
+  if (/^(?:\{[\s\S]*\}|\[[\s\S]*\])$/.test(trimmedCode)) return "json";
+  if (/\b(?:pwsh|powershell|Get-[A-Z]\w+|Set-[A-Z]\w+|Remove-[A-Z]\w+)\b/.test(trimmedCode)) {
+    return "powershell";
+  }
+  if (/^(?:bun|npm|pnpm|yarn|git|cd|ls|rg|cat|mkdir|rm|cp|mv)\b/.test(trimmedCode)) {
+    return "bash";
+  }
+  if (
+    /(?:\b[A-ZUTAFS]\w*::|::|->|#include\b|\bstd::|<[A-Z]\w+>|\b(?:nullptr|constexpr|template)\b)/.test(
+      trimmedCode,
+    )
+  ) {
+    return "cpp";
+  }
+  if (/<[A-Z][\w.]*[\s>/]/.test(trimmedCode)) return "tsx";
+  if (
+    /\b(?:const|let|var|function|import|export|return|await|async|type|interface)\b|=>/.test(
+      trimmedCode,
+    )
+  ) {
+    return "ts";
+  }
+  if (/[.][a-zA-Z_$][\w$]*\(|\w+\([^)]*\)/.test(trimmedCode)) return "ts";
+  return "text";
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function shikiBlockHtmlToInlineHtml(html: string, fallbackCode: string): string {
+  if (typeof document === "undefined") return escapeHtml(fallbackCode);
+
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  const codeElement = template.content.querySelector("code");
+  if (!codeElement) return escapeHtml(fallbackCode);
+
+  const lineElements = [...codeElement.querySelectorAll<HTMLElement>(".line")];
+  if (lineElements.length === 0) return codeElement.innerHTML;
+  return lineElements.map((lineElement) => lineElement.innerHTML).join("\n");
+}
+
+function isDefaultCodeTokenSpan(element: HTMLElement): boolean {
+  const styleColor = element.style.color;
+  return styleColor.length === 0 || DEFAULT_CODE_TOKEN_COLOR_PATTERN.test(styleColor);
+}
+
+function colorCppTypeIdentifiersInTextNode(textNode: Text): boolean {
+  const text = textNode.data;
+  CPP_LIKE_TYPE_IDENTIFIER_PATTERN.lastIndex = 0;
+  const matches = [...text.matchAll(CPP_LIKE_TYPE_IDENTIFIER_PATTERN)];
+  if (matches.length === 0) return false;
+
+  const fragment = document.createDocumentFragment();
+  let cursor = 0;
+  for (const match of matches) {
+    const index = match.index ?? 0;
+    if (index > cursor) {
+      fragment.append(document.createTextNode(text.slice(cursor, index)));
+    }
+
+    const highlight = document.createElement("span");
+    highlight.style.color = CPP_TYPE_COLOR;
+    highlight.textContent = match[0];
+    fragment.append(highlight);
+    cursor = index + match[0].length;
+  }
+
+  if (cursor < text.length) {
+    fragment.append(document.createTextNode(text.slice(cursor)));
+  }
+
+  textNode.replaceWith(fragment);
+  return true;
+}
+
+function colorCppTypeIdentifiers(root: ParentNode) {
+  const spans = [...root.querySelectorAll<HTMLElement>("span")];
+  for (const span of spans) {
+    if (!isDefaultCodeTokenSpan(span)) continue;
+
+    const textNodes = [...span.childNodes].filter(
+      (node): node is Text => node.nodeType === Node.TEXT_NODE,
+    );
+    for (const textNode of textNodes) {
+      colorCppTypeIdentifiersInTextNode(textNode);
+    }
+  }
+}
+
+function postprocessHighlightedHtml(html: string, language: string): string {
+  if (typeof document === "undefined" || !CPP_LIKE_LANGUAGE_PATTERN.test(language)) return html;
+
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  colorCppTypeIdentifiers(template.content);
+  return template.innerHTML;
+}
+// T3CODE-FORK-MOD-END fork/chat-code-highlighting
 
 function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNode }) {
   const [copied, setCopied] = useState(false);
@@ -197,7 +356,7 @@ function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNo
 interface SuspenseShikiCodeBlockProps {
   className: string | undefined;
   code: string;
-  themeName: DiffThemeName;
+  themeName: CodeBlockThemeName;
   isStreaming: boolean;
 }
 
@@ -234,7 +393,7 @@ function SuspenseShikiCodeBlock({
 interface UncachedShikiCodeBlockProps {
   code: string;
   language: string;
-  themeName: DiffThemeName;
+  themeName: CodeBlockThemeName;
   cacheKey: string;
   isStreaming: boolean;
 }
@@ -249,7 +408,10 @@ function UncachedShikiCodeBlock({
   const highlighter = use(getHighlighterPromise(language));
   const highlightedHtml = useMemo(() => {
     try {
-      return highlighter.codeToHtml(code, { lang: language, theme: themeName });
+      return postprocessHighlightedHtml(
+        highlighter.codeToHtml(code, { lang: language, theme: themeName }),
+        language,
+      );
     } catch (error) {
       // Log highlighting failures for debugging while falling back to plain text
       console.warn(
@@ -275,6 +437,92 @@ function UncachedShikiCodeBlock({
     <div className="chat-markdown-shiki" dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
   );
 }
+
+// T3CODE-FORK-MOD-BEGIN fork/chat-code-highlighting
+interface SuspenseShikiInlineCodeProps {
+  code: string;
+  themeName: CodeBlockThemeName;
+}
+
+function SuspenseShikiInlineCode({ code, themeName }: SuspenseShikiInlineCodeProps) {
+  const language = inferInlineCodeLanguage(code);
+  const cacheKey = createInlineHighlightCacheKey(code, language, themeName);
+  const cachedHighlightedHtml = highlightedCodeCache.get(cacheKey);
+
+  if (cachedHighlightedHtml != null) {
+    return (
+      <code
+        className="chat-markdown-inline-code chat-markdown-inline-shiki"
+        dangerouslySetInnerHTML={{ __html: cachedHighlightedHtml }}
+      />
+    );
+  }
+
+  return (
+    <UncachedShikiInlineCode
+      code={code}
+      language={language}
+      themeName={themeName}
+      cacheKey={cacheKey}
+    />
+  );
+}
+
+interface UncachedShikiInlineCodeProps {
+  code: string;
+  language: InlineCodeLanguage;
+  themeName: CodeBlockThemeName;
+  cacheKey: string;
+}
+
+function UncachedShikiInlineCode({
+  code,
+  language,
+  themeName,
+  cacheKey,
+}: UncachedShikiInlineCodeProps) {
+  const highlighter = use(getHighlighterPromise(language));
+  const highlightedHtml = useMemo(() => {
+    try {
+      return shikiBlockHtmlToInlineHtml(
+        postprocessHighlightedHtml(
+          highlighter.codeToHtml(code, { lang: language, theme: themeName }),
+          language,
+        ),
+        code,
+      );
+    } catch (error) {
+      console.warn(
+        `Inline code highlighting failed for language "${language}", falling back to plain text.`,
+        error instanceof Error ? error.message : error,
+      );
+      return shikiBlockHtmlToInlineHtml(
+        highlighter.codeToHtml(code, { lang: "text", theme: themeName }),
+        code,
+      );
+    }
+  }, [code, highlighter, language, themeName]);
+
+  useEffect(() => {
+    highlightedCodeCache.set(
+      cacheKey,
+      highlightedHtml,
+      estimateHighlightedSize(highlightedHtml, code),
+    );
+  }, [cacheKey, code, highlightedHtml]);
+
+  return (
+    <code
+      className="chat-markdown-inline-code chat-markdown-inline-shiki"
+      dangerouslySetInnerHTML={{ __html: highlightedHtml }}
+    />
+  );
+}
+
+function PlainInlineCode({ children }: { children: ReactNode }) {
+  return <code className="chat-markdown-inline-code">{children}</code>;
+}
+// T3CODE-FORK-MOD-END fork/chat-code-highlighting
 
 interface MarkdownFileLinkProps {
   href: string;
@@ -519,7 +767,6 @@ function ChatMarkdown({
   skills = EMPTY_MARKDOWN_SKILLS,
 }: ChatMarkdownProps) {
   const { resolvedTheme } = useTheme();
-  const diffThemeName = resolveDiffThemeName(resolvedTheme);
   const markdownFileLinkMetaByHref = useMemo(() => {
     const metaByHref = new Map<
       string,
@@ -593,7 +840,7 @@ function ChatMarkdown({
                 <SuspenseShikiCodeBlock
                   className={codeBlock.className}
                   code={codeBlock.code}
-                  themeName={diffThemeName}
+                  themeName={CODE_BLOCK_THEME_NAME}
                   isStreaming={isStreaming}
                 />
               </Suspense>
@@ -601,19 +848,33 @@ function ChatMarkdown({
           </MarkdownCodeBlock>
         );
       },
+      // T3CODE-FORK-MOD-BEGIN fork/chat-code-highlighting
+      code({ node: _node, className, children, ...props }) {
+        if (className) {
+          return (
+            <code {...props} className={className}>
+              {children}
+            </code>
+          );
+        }
+
+        const code = nodeToPlainText(children) || hastNodeToPlainText(_node);
+        return (
+          <CodeHighlightErrorBoundary fallback={<PlainInlineCode>{children}</PlainInlineCode>}>
+            <Suspense fallback={<PlainInlineCode>{children}</PlainInlineCode>}>
+              <SuspenseShikiInlineCode code={code} themeName={CODE_BLOCK_THEME_NAME} />
+            </Suspense>
+          </CodeHighlightErrorBoundary>
+        );
+      },
+      // T3CODE-FORK-MOD-END fork/chat-code-highlighting
     }),
-    [
-      diffThemeName,
-      fileLinkParentSuffixByPath,
-      isStreaming,
-      markdownFileLinkMetaByHref,
-      resolvedTheme,
-      skills,
-    ],
+    [fileLinkParentSuffixByPath, isStreaming, markdownFileLinkMetaByHref, resolvedTheme, skills],
   );
 
+  // T3CODE-FORK-MOD-BEGIN fork/custom-theme
   return (
-    <div className="chat-markdown w-full min-w-0 text-sm leading-relaxed text-foreground/80">
+    <div className="chat-markdown w-full min-w-0 text-sm leading-relaxed text-[color:var(--chat-message-text)]">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={markdownComponents}
@@ -623,6 +884,7 @@ function ChatMarkdown({
       </ReactMarkdown>
     </div>
   );
+  // T3CODE-FORK-MOD-END fork/custom-theme
 }
 
 export default memo(ChatMarkdown);

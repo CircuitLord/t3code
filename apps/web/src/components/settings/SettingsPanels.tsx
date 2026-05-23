@@ -1,4 +1,11 @@
-import { ArchiveIcon, ArchiveX, LoaderIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
+import {
+  ArchiveIcon,
+  ArchiveX,
+  LoaderIcon,
+  PlusIcon,
+  RefreshCwIcon,
+  Undo2Icon,
+} from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useCallback, useMemo, useRef, useState } from "react";
@@ -28,7 +35,12 @@ import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
 import { isElectron } from "../../env";
 import { buildHostedChannelSelectionUrl, type HostedAppChannel } from "../../hostedPairing";
-import { useTheme } from "../../hooks/useTheme";
+import {
+  isCustomThemeDefault,
+  normalizeCustomThemeColor,
+  type CustomThemeColorKey,
+  useTheme,
+} from "../../hooks/useTheme";
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
 import { useThreadActions } from "../../hooks/useThreadActions";
 import {
@@ -92,6 +104,43 @@ const THEME_OPTIONS = [
     label: "Dark",
   },
 ] as const;
+
+// T3CODE-FORK-MOD-BEGIN fork/custom-theme
+const CUSTOM_THEME_COLOR_FIELDS: ReadonlyArray<{
+  key: CustomThemeColorKey;
+  label: string;
+  description: string;
+  fallback: Record<"light" | "dark", string>;
+}> = [
+  {
+    key: "text",
+    label: "Text",
+    description: "Primary app text used by labels, headings, and controls.",
+    fallback: {
+      light: "#262626",
+      dark: "#f5f5f5",
+    },
+  },
+  {
+    key: "chatText",
+    label: "Main chat text",
+    description: "Assistant message text in the conversation timeline.",
+    fallback: {
+      light: "#3f3f46",
+      dark: "#d4d4d8",
+    },
+  },
+  {
+    key: "toolText",
+    label: "Tool rendering",
+    description: "Tool call and work-log text in the conversation timeline.",
+    fallback: {
+      light: "#737373",
+      dark: "#a3a3a3",
+    },
+  },
+] as const;
+// T3CODE-FORK-MOD-END fork/custom-theme
 
 const TIMESTAMP_FORMAT_LABELS = {
   locale: "System default",
@@ -377,8 +426,41 @@ function AboutVersionSection() {
   );
 }
 
+// T3CODE-FORK-MOD-BEGIN fork/custom-theme
+function ThemeColorPicker({
+  value,
+  fallback,
+  label,
+  onChange,
+}: {
+  value: string | undefined;
+  fallback: string;
+  label: string;
+  onChange: (value: string) => void;
+}) {
+  const pickerValue = normalizeCustomThemeColor(value) ?? fallback;
+
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        type="color"
+        value={pickerValue}
+        aria-label={label}
+        className="size-7 shrink-0 cursor-pointer rounded-md border border-border bg-background p-0.5"
+        onChange={(event) => onChange(event.target.value)}
+      />
+      <code className="w-[4.5rem] rounded-md bg-muted px-2 py-1 text-center text-[11px] font-medium text-muted-foreground">
+        {value ?? "default"}
+      </code>
+    </div>
+  );
+}
+// T3CODE-FORK-MOD-END fork/custom-theme
+
 export function useSettingsRestore(onRestored?: () => void) {
-  const { theme, setTheme } = useTheme();
+  // T3CODE-FORK-MOD-BEGIN fork/custom-theme
+  const { customTheme, resetCustomTheme, theme, setTheme } = useTheme();
+  // T3CODE-FORK-MOD-END fork/custom-theme
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
 
@@ -390,6 +472,9 @@ export function useSettingsRestore(onRestored?: () => void) {
   const changedSettingLabels = useMemo(
     () => [
       ...(theme !== "system" ? ["Theme"] : []),
+      // T3CODE-FORK-MOD-BEGIN fork/custom-theme
+      ...(!isCustomThemeDefault(customTheme) ? ["Custom colors"] : []),
+      // T3CODE-FORK-MOD-END fork/custom-theme
       ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
         ? ["Time format"]
         : []),
@@ -439,6 +524,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.enableAssistantStreaming,
       settings.sidebarThreadPreviewCount,
       settings.timestampFormat,
+      customTheme,
       theme,
     ],
   );
@@ -454,6 +540,9 @@ export function useSettingsRestore(onRestored?: () => void) {
     if (!confirmed) return;
 
     setTheme("system");
+    // T3CODE-FORK-MOD-BEGIN fork/custom-theme
+    resetCustomTheme();
+    // T3CODE-FORK-MOD-END fork/custom-theme
     updateSettings({
       timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
       diffWordWrap: DEFAULT_UNIFIED_SETTINGS.diffWordWrap,
@@ -469,7 +558,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       textGenerationModelSelection: DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
     });
     onRestored?.();
-  }, [changedSettingLabels, onRestored, setTheme, updateSettings]);
+  }, [changedSettingLabels, onRestored, resetCustomTheme, setTheme, updateSettings]);
 
   return {
     changedSettingLabels,
@@ -478,7 +567,10 @@ export function useSettingsRestore(onRestored?: () => void) {
 }
 
 export function GeneralSettingsPanel() {
-  const { theme, setTheme } = useTheme();
+  // T3CODE-FORK-MOD-BEGIN fork/custom-theme
+  const { customTheme, resetCustomTheme, resolvedTheme, setCustomTheme, theme, setTheme } =
+    useTheme();
+  // T3CODE-FORK-MOD-END fork/custom-theme
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
   const observability = useServerObservability();
@@ -498,6 +590,9 @@ export function GeneralSettingsPanel() {
   const gitModelInstanceEntries = sortProviderInstanceEntries(
     deriveProviderInstanceEntries(serverProviders),
   );
+  // T3CODE-FORK-MOD-BEGIN fork/custom-theme
+  const customThemeIsDefault = isCustomThemeDefault(customTheme);
+  // T3CODE-FORK-MOD-END fork/custom-theme
   const textGenInstanceEntry = gitModelInstanceEntries.find(
     (entry) => entry.instanceId === textGenInstanceId,
   );
@@ -549,6 +644,79 @@ export function GeneralSettingsPanel() {
             </Select>
           }
         />
+
+        {/* T3CODE-FORK-MOD-BEGIN fork/custom-theme */}
+        <SettingsRow
+          title="Custom colors"
+          description="Override a small set of high-impact color tokens on top of the selected theme."
+          resetAction={
+            !customThemeIsDefault ? (
+              <SettingResetButton label="custom colors" onClick={resetCustomTheme} />
+            ) : null
+          }
+          control={
+            <>
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={customThemeIsDefault}
+                onClick={resetCustomTheme}
+              >
+                <Undo2Icon className="size-3" />
+                Defaults
+              </Button>
+              <Switch
+                checked={customTheme.enabled}
+                onCheckedChange={(checked) =>
+                  setCustomTheme({ ...customTheme, enabled: Boolean(checked) })
+                }
+                aria-label="Enable custom colors"
+              />
+            </>
+          }
+        />
+
+        {CUSTOM_THEME_COLOR_FIELDS.map((field) => {
+          const value = customTheme.colors[field.key];
+          return (
+            <SettingsRow
+              key={field.key}
+              title={field.label}
+              description={field.description}
+              resetAction={
+                value ? (
+                  <SettingResetButton
+                    label={`${field.label.toLowerCase()} color`}
+                    onClick={() => {
+                      const colors = { ...customTheme.colors };
+                      delete colors[field.key];
+                      setCustomTheme({ ...customTheme, colors });
+                    }}
+                  />
+                ) : null
+              }
+              control={
+                <ThemeColorPicker
+                  value={value}
+                  fallback={field.fallback[resolvedTheme]}
+                  label={`${field.label} color`}
+                  onChange={(nextValue) => {
+                    const color = normalizeCustomThemeColor(nextValue);
+                    if (!color) return;
+                    setCustomTheme({
+                      enabled: true,
+                      colors: {
+                        ...customTheme.colors,
+                        [field.key]: color,
+                      },
+                    });
+                  }}
+                />
+              }
+            />
+          );
+        })}
+        {/* T3CODE-FORK-MOD-END fork/custom-theme */}
 
         <SettingsRow
           title="Time format"

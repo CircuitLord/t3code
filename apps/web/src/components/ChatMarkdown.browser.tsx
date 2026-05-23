@@ -138,4 +138,55 @@ describe("ChatMarkdown", () => {
       await screen.unmount();
     }
   });
+
+  // T3CODE-FORK-MOD-BEGIN fork/chat-code-highlighting
+  it("syntax highlights backtick and tilde fenced code blocks", async () => {
+    const screen = await render(
+      <ChatMarkdown
+        text={["```ts", "const x = 1;", "```", "", "~~~ts", "const y = 2;", "~~~"].join("\n")}
+        cwd="/repo/project"
+      />,
+    );
+
+    try {
+      await vi.waitFor(() => {
+        expect(document.querySelectorAll(".chat-markdown-shiki .shiki").length).toBe(2);
+      });
+      expect(
+        document.querySelectorAll(".chat-markdown-shiki .shiki.t3code-ember-dark").length,
+      ).toBe(2);
+      const tokenColors = [...document.querySelectorAll<HTMLElement>(".chat-markdown-shiki span")]
+        .map((element) => element.style.color)
+        .filter((color) => color.length > 0);
+      expect(new Set(tokenColors).size).toBeGreaterThan(1);
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("syntax highlights inline code snippets", async () => {
+    const screen = await render(
+      <ChatMarkdown
+        text={
+          "Remove `UGoalComponent::Simulate()` and avoid `OtherActor->FindComponentByClass<URollbackBallComponent>()`."
+        }
+        cwd="/repo/project"
+      />,
+    );
+
+    try {
+      await vi.waitFor(() => {
+        expect(document.querySelectorAll(".chat-markdown-inline-shiki").length).toBe(2);
+      });
+      const tokenColors = [
+        ...document.querySelectorAll<HTMLElement>(".chat-markdown-inline-shiki span"),
+      ]
+        .map((element) => element.style.color)
+        .filter((color) => color.length > 0);
+      expect(new Set(tokenColors).size).toBeGreaterThan(1);
+    } finally {
+      await screen.unmount();
+    }
+  });
+  // T3CODE-FORK-MOD-END fork/chat-code-highlighting
 });

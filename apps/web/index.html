@@ -25,6 +25,32 @@
           const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
           const isDark = theme === "dark" || (theme === "system" && prefersDark);
           document.documentElement.classList.toggle("dark", isDark);
+          // T3CODE-FORK-MOD-BEGIN fork/custom-theme
+          try {
+            const storedCustomTheme = window.localStorage.getItem("t3code:custom-theme");
+            const customTheme = storedCustomTheme ? JSON.parse(storedCustomTheme) : null;
+            const customColors =
+              customTheme && customTheme.enabled === true && typeof customTheme.colors === "object"
+                ? customTheme.colors
+                : null;
+            const normalizeColor = (value) =>
+              typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value.trim())
+                ? value.trim().toLowerCase()
+                : null;
+            const textColor = normalizeColor(customColors?.text);
+            const chatTextColor = normalizeColor(customColors?.chatText);
+            const toolTextColor = normalizeColor(customColors?.toolText);
+            if (textColor) document.documentElement.style.setProperty("--foreground", textColor);
+            if (chatTextColor) {
+              document.documentElement.style.setProperty("--chat-message-text", chatTextColor);
+            }
+            if (toolTextColor) {
+              document.documentElement.style.setProperty("--tool-rendering-text", toolTextColor);
+            }
+          } catch {
+            // Ignore malformed custom theme storage; the app module sanitizes it later.
+          }
+          // T3CODE-FORK-MOD-END fork/custom-theme
           const chromeColor = isDark ? DARK_BACKGROUND : LIGHT_BACKGROUND;
           document.documentElement.style.backgroundColor = chromeColor;
           themeColorMeta?.setAttribute("content", chromeColor);
